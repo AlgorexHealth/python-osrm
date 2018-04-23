@@ -4,17 +4,12 @@ from polyline.codec import PolylineCodec
 from polyline import encode as polyline_encode
 from pandas import DataFrame
 from . import RequestConfig
+from shapely import geometry
 
 try:
     from urllib.request import urlopen
 except:
     from urllib2 import urlopen
-
-try:
-    from osgeo.ogr import Geometry
-except:
-    from ogr import Geometry
-
 import json
 
 
@@ -109,10 +104,7 @@ def decode_geom(encoded_polyline):
     line : ogr.Geometry
         The line geometry, as an ogr.Geometry instance.
     """
-    ma_ligne = Geometry(2)
-    lineAddPts = ma_ligne.AddPoint_2D
-    for coord in PolylineCodec().decode(encoded_polyline):
-        lineAddPts(coord[1], coord[0])
+    ma_ligne = geometry.LineString(PolylineCodec().decode(encoded_polyline))
     return ma_ligne
 
 
@@ -153,8 +145,8 @@ def simple_route(coord_origin, coord_dest, coord_intermediate=None,
         The result, parsed as a dict, with the geometry decoded in the format
         defined in `geometry`.
     """
-    if geometry.lower() not in ('wkt', 'well-known-text', 'text', 'polyline',
-                                'wkb', 'well-known-binary', 'geojson'):
+    if geometry.lower() not in ('text', 'polyline',
+                                 'geojson'):
         raise ValueError("Invalid output format")
     else:
         geom_request = "geojson" if "geojson" in geometry.lower() \
@@ -199,13 +191,7 @@ def simple_route(coord_origin, coord_dest, coord_intermediate=None,
         elif geometry in ("polyline", "geojson") and output == "routes":
             return parsed_json["routes"]
         else:
-            if geometry == "wkb":
-                func = Geometry.ExportToWkb
-            elif geometry == "wkt":
-                func = Geometry.ExportToWkt
-
-            for route in parsed_json["routes"]:
-                route["geometry"] = func(decode_geom(route["geometry"]))
+            raise ValueError('Unrecognized Parse Function ')
 
         return parsed_json if output == "full" else parsed_json["routes"]
 
@@ -442,14 +428,7 @@ def trip(coords, steps=False, output="full",
         elif geometry in ("polyline", "geojson") and output == "trip":
             return parsed_json["trips"]
         else:
-            func = Geometry.ExportToWkb if geometry == "wkb" \
-                else Geometry.ExportToWkt
-
-            for trip_route in parsed_json["trips"]:
-                trip_route["geometry"] = func(decode_geom(
-                                            trip_route["geometry"]))
-
-        return parsed_json if output == "full" else parsed_json["routes"]
+            raise ValueError('Unrecognized')
 
     else:
         raise ValueError(

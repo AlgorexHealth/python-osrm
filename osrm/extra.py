@@ -11,7 +11,7 @@ import matplotlib
 if not matplotlib.get_backend():
     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib.mlab import griddata
+from scipy.interpolate import griddata
 
 
 def contour_poly(gdf, field_name, n_class):
@@ -52,34 +52,28 @@ def contour_poly(gdf, field_name, n_class):
     else:
         valid_geoms = gdf[['geometry', field_name]][:]
 
-    # Always in order to avoid invalid value which will cause the fail
-    # of the griddata function :
-    try:  # Normal way (fails if a non valid geom is encountered)
-        x = np.array([geom.coords.xy[0][0] for geom in valid_geoms.geometry])
-        y = np.array([geom.coords.xy[1][0] for geom in valid_geoms.geometry])
-        z = valid_geoms[field_name].values
-    except:  # Taking the long way to load the value... :
-        x = np.array([])
-        y = np.array([])
-        z = np.array([], dtype=float)
-        for idx, geom, val in gdf[['geometry', field_name]].itertuples():
-            try:
-                x = np.append(x, geom.coords.xy[0][0])
-                y = np.append(y, geom.coords.xy[1][0])
-                z = np.append(z, val)
-            except Exception as err:
-                print(err)
+    x = np.array([])
+    y = np.array([])
+    z = np.array([], dtype=float)
+    for idx, geom, val in gdf[['geometry', field_name]].itertuples():
+        x = np.append(x, geom.coords.xy[0][0])
+        y = np.append(y, geom.coords.xy[1][0])
+        z = np.append(z, val)
+
 
 #    # compute min and max and values :
     minx = np.nanmin(x)
     miny = np.nanmin(y)
     maxx = np.nanmax(x)
     maxy = np.nanmax(y)
+    minz = np.nanmin(z)
+    maxz = np.nanmax(z)
 
     # Assuming we want a square grid for the interpolation
     xi = np.linspace(minx, maxx, 200)
     yi = np.linspace(miny, maxy, 200)
-    zi = griddata(x, y, z, xi, yi, interp='linear')
+    zi = np.linspace(minz, maxz, 200)
+    #zi = griddata(points=(x, y), values=z, xi=(xi, yi), method='linear')
 
     interval_time = int(round(np.nanmax(z) / n_class))
     nb_inter = n_class + 1
@@ -87,24 +81,32 @@ def contour_poly(gdf, field_name, n_class):
 #    levels = [nb for nb in range(0, int(round(np.nanmax(z))+1)+jmp, jmp)]
     levels = tuple([nb for nb in range(0, int(
         np.nanmax(z) + 1) + interval_time, interval_time)][:nb_inter+1])
-
-    collec_poly = plt.contourf(
-        xi, yi, zi, levels, cmap=plt.cm.rainbow,
-        vmax=abs(zi).max(), vmin=-abs(zi).max(), alpha=0.35
-        )
+    collec_poly = []
+    for trip_time in levels:
+        pts_select = gdf[gdf.time <= trip_time]
+        poly = pts_select.geometry.unary_union.convex_hull
+        collec_poly.append(poly)
+        
+        
+#     collec_poly = plt.contourf(
+#         xi, yi, zi, levels, cmap=plt.cm.rainbow,
+#         vmax=abs(zi).max(), vmin=-abs(zi).max(), alpha=0.35
+#     )
+    
 
     return collec_poly, levels[1:]
 
 
-def isopoly_to_gdf(collec_poly, field_name, levels):
+def isopoly_to_gdf(gdf, collec_poly, field_name, levels):
     """
-    Transform a collection of matplotlib polygons (:py:obj:`QuadContourSet`)
+    Transform a collection of shapely polygons 
     to a :py:obj:`GeoDataFrame` with a columns (`field_name`) filled by the
     values contained in `levels`.
 
     Parameters
     ----------
-    collec_poly : :py:obj:matplotlib.contour.QuadContourSet
+    gdf : the grid of points and time 
+    collec_poly : :shapely Polygons
         The previously retrieved collections of contour polygons.
     field_name : str
         The name of the column to create which will contain values from `levels`.
@@ -120,27 +122,8 @@ def isopoly_to_gdf(collec_poly, field_name, levels):
         with the corresponding levels.
     """
     polygons, data = [], []
-
-    for i, polygon in enumerate(collec_poly.collections):
-        mpoly = []
-        for path in polygon.get_paths():
-            path.should_simplify = False
-            poly = path.to_polygons()
-            exterior, holes = [], []
-            if len(poly) > 0 and len(poly[0]) > 3:
-                exterior = poly[0]
-                if len(poly) > 1:  # There's some holes
-                    holes = [h for h in poly[1:] if len(h) > 3]
-            mpoly.append(Polygon(exterior, holes))
-        if len(mpoly) > 1:
-            mpoly = MultiPolygon(mpoly)
-            polygons.append(mpoly)
-            if levels:
-                data.append(levels[i])
-        elif len(mpoly) == 1:
-            polygons.append(mpoly[0])
-            if levels:
-                data.append(levels[i])
+    polygons = collec_poly
+    data = gdf[field_name]
 
     if len(data) == len(polygons):
         return GeoDataFrame(geometry=polygons,
@@ -262,5 +245,5 @@ class AccessIsochrone:
             The shape of the computed accessibility polygons.
         """
         collec_poly, levels = contour_poly(self.grid, 'time', n_class=n_class)
-        gdf_poly = isopoly_to_gdf(collec_poly, 'time', levels)
+        gdf_poly = isopoly_to_gdf(self.grid, collec_poly, 'time', levels)
         return gdf_poly
